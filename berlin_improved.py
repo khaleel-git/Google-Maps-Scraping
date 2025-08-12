@@ -13,13 +13,15 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-# Global Variables
-afile = open("useragents.txt")
-
 # Functions
-def random_line(afile):
-    lines = afile.readlines()
-    return random.choice(lines)
+def random_line(filename):
+    with open(filename, 'r', encoding='utf-8') as f:
+        lines = [line.strip() for line in f if line.strip()]
+    if not lines:
+        raise ValueError("Useragents file is empty!")
+    chosen = random.choice(lines)
+    print(f"useragents.txt ---> {chosen}")
+    return chosen
 # save_to_file
 def save_to_file(filename, data_set):
     with open(filename, "w") as f:
@@ -39,26 +41,47 @@ def is_google_redirect(url):
 
 def get_final_url_via_selenium(redirect_url):
     try:
+        original_window = driver.current_window_handle
+        driver.execute_script("window.open('');")
+        driver.switch_to.window(driver.window_handles[-1])
         driver.get(redirect_url)
-        wait(driver, 10).until(lambda d: d.current_url != redirect_url)
+        
+        wait(driver, 10).until(lambda d: d.execute_script("return document.readyState") == "complete")
+        
         final_url = driver.current_url
+        
+        driver.close()
+        driver.switch_to.window(original_window)
     except Exception as e:
         print("Error getting final URL:", e)
         final_url = None
     return final_url
+    
+def fetch_emails(url):
+    filename = "C:\\Users\\khale\\Documents\\Google-Maps-Scraping\\useragents.txt"
+    headers = {
+        'User-Agent': random_line(filename).rstrip(),
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Referer': 'https://www.google.com/',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
 
-def fetch_emails(url): # fetch_emails
-    """Fetch and return a set of emails from the given URL."""
+    session = requests.Session()
     try:
-        headers = random_line(afile).rstrip()
+        # print(f"Headers: {headers}")
         time.sleep(1 + random.uniform(0, 1))
-        r  = requests.get(url, headers={'User-Agent': headers}, timeout = 100)
+        r = session.get(url, headers=headers, timeout=30)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        return set(re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", soup.get_text()))
+        emails = set(re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", soup.get_text()))
+        return emails
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP error fetching {url}: {e}")
     except Exception as e:
         print(f"Error fetching {url}: {e}")
-        return set()
+    return set()
 
 # find_relevant_page (contact us, career, jobs etc.)
 def find_relevant_pages(base_url):
@@ -69,7 +92,8 @@ def find_relevant_pages(base_url):
     """
     keywords = [
         "contact", "kontakt", "about", "über", "impressum", 
-        "job", "career", "karriere", "stellenangebot", "jobs", "stellen"
+        "job", "career", "karriere", "stellenangebot", "jobs", "stellen", "Work with us", "join us", "team", "teammitglied", "team member",
+        "contact us", "kontaktieren sie uns", "kontaktieren Sie uns", "reach out", "reachout", "reach out",
     ]
 
     relevant_urls = set()
@@ -102,7 +126,7 @@ try:
     tracked_emails = load_tracked_set("tracked_emails.txt")
     tracked_websites = load_tracked_set("tracked_websites.txt")
     # Accept cookies
-    try:
+    try: # only german cookies
         accept_btn = wait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Alle akzeptieren')]"))
         )
@@ -118,7 +142,6 @@ try:
 
     # Track processed links
     processed = set()
-
 
     while True:
         listings = scrollable_div.find_elements(By.XPATH, ".//a[contains(@class,'hfpxzc')]")
@@ -171,20 +194,16 @@ try:
             print(f"Website: {website}")
 
             if website:
-                # Save website after processing emails
-                tracked_websites.add(website)
-                save_to_file("tracked_websites.txt", tracked_websites)
 
                 # Fetch emails from homepage
                 emails = fetch_emails(website)
-                new_emails = emails - tracked_emails
 
-                if new_emails:
-                    print(f"New emails found on {website}: {new_emails}")
-                    tracked_emails.update(new_emails)
-                    save_to_file("tracked_emails.txt", tracked_emails)
-                    for i, email in enumerate(new_emails, 1):
+                if emails:
+                    print(f"New emails found on {website}: {emails}")
+                    for i, email in enumerate(emails, 1):
+                        tracked_emails.add(email)
                         print(f"email {i}: {email}")
+                    tracked_websites.add(website)
                 else: 
                     print(f"⚠️ No emails found on homepage of {website}")
 
@@ -194,22 +213,25 @@ try:
                 print(f"Found {len(relevant_pages)} relevant pages.")
                 if relevant_pages:
                     for url in relevant_pages:
-                        relevant_emails = fetch_emails(url)
-                        new_emails = relevant_emails - tracked_emails
-                        if new_emails:
-                            print(f"New emails found on {website}: {new_emails}")
-                            tracked_emails.update(new_emails)
-                            save_to_file("tracked_emails.txt", tracked_emails)
-                            for i, email in enumerate(new_emails, 1):
+                        print(f"Checking {url} for emails...")
+                        emails = fetch_emails(url)
+                        # new_emails = relevant_emails - tracked_emails
+                        if emails:
+                            print(f"New emails found on {website}: {emails}")
+                            for i, email in enumerate(emails, 1):
                                 print(f"email {i}: {email}")
+                                tracked_emails.add(email)
+                            tracked_websites.add(website)
                             break  # stop after finding emails
                     else:
                         # no break happened → no emails found on any relevant page
                         print("⚠️ No emails found on any relevant page.")
                 else:
                     print("⚠️ No relevant pages found.")
+                # Return to list
+                save_to_file("tracked_emails.txt", tracked_emails)
+                save_to_file("tracked_websites.txt", tracked_websites)
 
-            # Return to list
             driver.execute_script("arguments[0].scrollIntoView();", scrollable_div)
             time.sleep(1 + random.uniform(0, 1))
 

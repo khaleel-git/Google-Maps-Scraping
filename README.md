@@ -100,5 +100,5 @@ This project is released under the MIT License.
 ---
 
 ## Author
-Khaleel Ahmad
+Khaleel Ahmad,
 Contact: [khaleel.eu@gmail.com](mailto:khaleel.eu@gmail.com)
